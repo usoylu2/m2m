@@ -5,7 +5,7 @@ from scipy import signal
 import random
 import matlab.engine
 import numpy as np
-from read_files import read, read_mat, read_calibration1
+from read_files import read, read_mat, read_calibration1, read_calibration_l11_5
 
 # Start a MATLAB engine session
 eng = matlab.engine.start_matlab()
@@ -24,12 +24,12 @@ torch.cuda.manual_seed_all(42)
 # -third one is for Calibration Phantom 2 & Freehand Acq
 # -fourth one is for Calibration Phantom 2 & Stable Acq
 
-fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/stable/sonixone/calib2/ufuk1.rf',
-    '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/stable/verasonics/post/calib2.mat']
-# fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/freehand/sonixone/calib2/ufuk1.rf',
-#     '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/freehand/verasonics/post/calib2_1.mat']
-#fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/sonixone/free_calibration/glass/ufuk1.rf',
-#    '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/verasonics/free_calibration/glass1.mat']
+# fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/stable/sonixone/calib2/ufuk1.rf',
+#     '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/stable/verasonics/post/calib2.mat']
+fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/freehand/sonixone/calib2/ufuk1.rf',
+    '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/CIRS/freehand/verasonics/post/calib2_1.mat']
+# fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/sonixone/free_calibration/glass/ufuk1.rf',
+#              '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/verasonics/free_calibration/glass1.mat']
 # fileNames = ['//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/sonixone/stable/50MHz/glass/ufuk1.rf',
 #   '//bi-isilon-smb.beckman.illinois.edu/oelze/home/usoylu2/dataset/model_security/PostBeamformed/verasonics/stable/linear_50MHz/glass_calibration.mat']
 
@@ -52,8 +52,9 @@ class TestTimeCalibration(nn.Module):
             if h == 0:
                 rf_np = read(fileNames[h])
             elif h == 1:
-                # rf_np = read_calibration1()  # Turn this on for free hand calibration
+                # rf_np = read_calibration1()  # Turn this on for free hand calibration for L9-4
                 rf_np = read_mat(fileNames[h], "calibration")  # Turn this on for stable calibration
+                # rf_np = read_calibration_l11_5() # Turn this on for free hand calibration for L11-5
             else:
                 raise TypeError("Wrong filenames")
             for depth_index in range(Depth):
@@ -117,7 +118,8 @@ class TrainTimeCalibration(nn.Module):
                 rf_np = read(fileNames[h])
             elif h == 1:
                 rf_np = read_mat(fileNames[h], "calibration")  # Turn this on for stable calibration
-                # rf_np = read_calibration1  # Turn this on for free hand calibration
+                # rf_np = read_calibration1()  # Turn this on for free hand calibration
+                # rf_np = read_calibration_l11_5() # Turn this on for free hand calibration for L11-5
             else:
                 raise TypeError("Wrong filenames")
             for depth_index in range(Depth):

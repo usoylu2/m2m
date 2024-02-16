@@ -1,3 +1,8 @@
+# 1. Load the no calibration model
+# 2. Freeze feature extractor
+# 3. Load test set and select a number of frames
+# 4. Finetune the model 5e-6, 25 epochs
+
 import torch
 import numpy as np
 import torch.nn as nn
@@ -15,13 +20,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Flags for controlling various aspects of the training and testing process
 Normalization_FLAG = True
-Train_Calibration_FLAG = True
-Test_Calibration_FLAG = False
-ResNet_flag = True
-DenseNet_flag = False
+ResNet_flag = False
+DenseNet_flag = True
 
 # Folder name for log and model storage
-folder_name = "traincalibration_l11_5"
+folder_name = "finetune"
 
 # Determine the device for training (CPU or GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -46,19 +49,16 @@ writer = SummaryWriter(log_dir)
 # Directory for storing trained models
 PATH_models = f"C:/Users/usoylu2/PycharmProjects/m2m/revision/exps/{folder_name}/models/"
 # Set parameters for training
-learning_rate = [1e-5]
-test_images = [2000]
+learning_rate = [5e-6]
+test_images = [200]
 us_images = [2000]
-epochs = [50]
+epochs = [25]
 repetition = 10
 # Set parameters for patch extraction
 Depth = 9
 Batch_size = 2048
 Start_pixel = 540
-# Initialize Calibration Models
-Filter_length = 51
-filter_aug_test = TestTimeCalibration(filter_length=Filter_length, device=device)
-filter_aug_train = TrainTimeCalibration(probability=1, filter_length=Filter_length, device=device)
+
 # Set random seeds for reproducibility
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
@@ -131,21 +131,11 @@ def test_function(x_test, y_test, depth_test, mean_data, std_data, PATH):
     else:
         raise ValueError("Invalid Network")
 
-    # Use Batch Stats in BatchNorm2d layers
-    for module in net.modules():
-        if isinstance(module, nn.BatchNorm2d):
-            module.track_running_stats = False
-            module.running_var, module.running_mean = None, None
-            module.eval()
-
     net.load_state_dict(torch.load(PATH))
 
     x_test_gpu = torch.from_numpy(x_test[:, np.newaxis, :, :]).float().to(device)
     y_test_gpu = torch.from_numpy(y_test).float().to(device)
     depth_test_gpu = torch.from_numpy(depth_test).to(device)
-
-    if Test_Calibration_FLAG:
-        x_test_gpu = filter_aug_test(x_test_gpu, depth_test_gpu)
 
     # Calculate Mean
     mean_test = torch.mean(x_test_gpu, 0, True)
@@ -213,7 +203,7 @@ def test_function(x_test, y_test, depth_test, mean_data, std_data, PATH):
     return total/2, auc
 
 
-def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid, PATH, epoch_num, LR):
+def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid, PATH, pre_PATH, epoch_num, LR):
 
     x_train_gpu = torch.from_numpy(x_train[:, np.newaxis, :, :]).float().to(device)
     y_train_gpu = torch.from_numpy(y_train).float().to(device)
@@ -222,10 +212,6 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
     x_valid_gpu = torch.from_numpy(x_valid[:, np.newaxis, :, :]).float().to(device)
     y_valid_gpu = torch.from_numpy(y_valid).float().to(device)
     depth_valid_gpu = torch.from_numpy(depth_valid).to(device)
-
-    if Train_Calibration_FLAG:
-        x_train_gpu = filter_aug_train(x_train_gpu, depth_train_gpu)
-        x_valid_gpu = filter_aug_train(x_valid_gpu, depth_valid_gpu)
 
     # Calculate Mean
     mean_data = torch.mean(x_train_gpu, 0, True)
@@ -256,12 +242,34 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
     else:
         raise ValueError("Invalid Network")
 
-    # Use Batch Stats in BatchNorm2d layers
+    # print(net)
+    # Load pre-trained model and freeze layers
+    net.load_state_dict(torch.load(pre_PATH))
+    cnt = 0
     for module in net.modules():
+        # print(cnt, module)
+        # if cnt == 144:  # 144 for ResNet
+        #     break
+        if cnt == 698:  # 144 for DenseNet
+            break
         if isinstance(module, nn.BatchNorm2d):
-            module.track_running_stats = False
-            module.running_var, module.running_mean = None, None
+            if hasattr(module, 'weight'):
+                module.weight.requires_grad_(False)
+            if hasattr(module, 'bias'):
+                module.bias.requires_grad_(False)
+            # module.track_running_stats = False
+            module.affine = False
+            # module.running_var, module.running_mean = None, None
             module.eval()
+        elif isinstance(module, nn.Linear):
+            print("Linear layer not frozen")
+        elif isinstance(module, nn.Conv2d):
+            if hasattr(module, 'weight'):
+                module.weight.requires_grad = False
+            if hasattr(module, 'bias'):
+                if module.bias is not None:
+                    module.bias.requires_grad = False
+        cnt += 1
 
     parameter_number = sum(p.numel() for p in net.parameters() if p.requires_grad)
     logger.info(f"Number of trainable parameters:{parameter_number}")
@@ -354,7 +362,6 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
             accuracies.append(total/2)
             writer.add_scalar("Accuracy/valid", total/2, epoch)
         logger.info(f"Execution time is {time.time() - start_time} seconds")
-        # torch.save(net.state_dict(), PATH_models+f"epoch{epoch}.pth")
     logger.info('Finished Training')
 
     torch.save(net.state_dict(), PATH)
@@ -430,7 +437,7 @@ def test_split(vol1, vol2, num):
     y = y[indices]
 
     x_test1, x_test2, y_test1, y_test2, depth_test1, depth_test2 = train_test_split(x, y, depth,
-                                                                                 test_size=0.5, random_state=42)
+                                                                                    test_size=0.5, random_state=42)
     return x_test1, x_test2, y_test1, y_test2, depth_test1, depth_test2
 
 
@@ -452,10 +459,10 @@ if __name__ == '__main__':
             # Load training and test data
             train_vol1 = np.load(f'./train1.npy')
             train_vol2 = np.load(f'./train2.npy')
-            # test_vol1 = np.load(f'./test1.npy')
-            # test_vol2 = np.load(f'./test2.npy')
-            test_vol1 = np.load(f'./test1_l11_5.npy')
-            test_vol2 = np.load(f'./test2_l11_5.npy')
+            test_vol1 = np.load(f'./test1.npy')
+            test_vol2 = np.load(f'./test2.npy')
+            # test_vol1 = np.load(f'./test1_l11_5.npy')
+            # test_vol2 = np.load(f'./test2_l11_5.npy')
 
             # Split data into training and validation sets
             x_train, x_dev, y_train, y_dev, depth_train, depth_dev = train_split(train_vol1, train_vol2, train_num)
@@ -463,7 +470,8 @@ if __name__ == '__main__':
             logger.info(f"{x_train.shape}, {x_dev.shape}, {y_train.shape}, {y_dev.shape}")
 
             # Train the model and obtain mean and standard deviation of the data
-            mean_data, std_data, acc = train_function(x_train, x_dev, y_train, y_dev, depth_train, depth_dev,
+            mean_data, std_data, acc = train_function(x_test1, x_test1, y_test1, y_test1, depth_test1, depth_test1,
+                                                      f"./exps/{folder_name}/repetition{i}_tuned.pth",
                                                       f"./exps/{folder_name}/repetition{i}.pth", epoch, LR)
 
             # Save the mean and standard deviation data
@@ -475,7 +483,7 @@ if __name__ == '__main__':
 
             # Test the model and calculate AUC
             temp, auc = test_function(x_test2, y_test2, depth_test2, mean_data, std_data,
-                                      f"./exps/{folder_name}/repetition{i}.pth")
+                                      f"./exps/{folder_name}/repetition{i}_tuned.pth")
             logger.info(f"Test results - Accuracy: {temp}, AUC: {auc}")
             c1.append(temp)
             c2.append(auc)

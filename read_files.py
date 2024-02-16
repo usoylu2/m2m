@@ -86,3 +86,30 @@ def read_calibration1():
         filename = folder + str(i+1) + ext
         data[:, :, i*20:i*20+20] = read_mat(filename, "train")
     return data
+
+
+def read_calibration_l11_5():
+    """
+    Read free hand calibration data from L11-5v.
+
+    Returns:
+    np.ndarray: A NumPy array containing the concatenated calibration data.
+    """
+    x = np.array(range(4296))
+    y = np.array(range(128))
+    y_new = np.linspace(0, 128, 256)
+    data_new = np.zeros((256, 4296, 20))
+    data_final = np.zeros((2080, 256, 1000))
+
+    for i in range(50):
+        folder = "//172.22.224.234/usoylu2/L11-5v/beamformed/calibration1/calibration"
+        ext = ".mat"
+        filename = folder + str(i+1) + ext
+        mat = scipy.io.loadmat(filename)
+        data = mat['lognorm_mod_after']
+        data = np.swapaxes(data, 0, 1)
+        for j in range(20):
+            f = interpolate.interp2d(x, y, np.squeeze(data[:, :, j]), kind='linear')
+            data_new[:, :, j] = f(x, y_new)
+        data_final[:, :, i*20:i*20+20] = np.swapaxes(data_new, 0, 1)[:2080]
+    return data_final

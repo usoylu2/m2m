@@ -15,13 +15,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Flags for controlling various aspects of the training and testing process
 Normalization_FLAG = True
-Train_Calibration_FLAG = True
-Test_Calibration_FLAG = False
-ResNet_flag = True
-DenseNet_flag = False
+ResNet_flag = False
+DenseNet_flag = True
 
 # Folder name for log and model storage
-folder_name = "traincalibration_l11_5"
+folder_name = "freezeBN"
 
 # Determine the device for training (CPU or GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -43,22 +41,17 @@ logger = logging.getLogger(__name__)
 log_dir = f"C:/Users/usoylu2/PycharmProjects/m2m/revision/exps/{folder_name}/logs"
 writer = SummaryWriter(log_dir)
 
-# Directory for storing trained models
-PATH_models = f"C:/Users/usoylu2/PycharmProjects/m2m/revision/exps/{folder_name}/models/"
 # Set parameters for training
-learning_rate = [1e-5]
+learning_rate = [5e-6]
 test_images = [2000]
 us_images = [2000]
-epochs = [50]
+epochs = [25]
 repetition = 10
 # Set parameters for patch extraction
 Depth = 9
 Batch_size = 2048
 Start_pixel = 540
-# Initialize Calibration Models
-Filter_length = 51
-filter_aug_test = TestTimeCalibration(filter_length=Filter_length, device=device)
-filter_aug_train = TrainTimeCalibration(probability=1, filter_length=Filter_length, device=device)
+
 # Set random seeds for reproducibility
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
@@ -131,10 +124,15 @@ def test_function(x_test, y_test, depth_test, mean_data, std_data, PATH):
     else:
         raise ValueError("Invalid Network")
 
-    # Use Batch Stats in BatchNorm2d layers
+    # Freezing BatchNorm2d layers
     for module in net.modules():
         if isinstance(module, nn.BatchNorm2d):
+            if hasattr(module, 'weight'):
+                module.weight.requires_grad_(False)
+            if hasattr(module, 'bias'):
+                module.bias.requires_grad_(False)
             module.track_running_stats = False
+            module.affine = False
             module.running_var, module.running_mean = None, None
             module.eval()
 
@@ -143,9 +141,6 @@ def test_function(x_test, y_test, depth_test, mean_data, std_data, PATH):
     x_test_gpu = torch.from_numpy(x_test[:, np.newaxis, :, :]).float().to(device)
     y_test_gpu = torch.from_numpy(y_test).float().to(device)
     depth_test_gpu = torch.from_numpy(depth_test).to(device)
-
-    if Test_Calibration_FLAG:
-        x_test_gpu = filter_aug_test(x_test_gpu, depth_test_gpu)
 
     # Calculate Mean
     mean_test = torch.mean(x_test_gpu, 0, True)
@@ -223,10 +218,6 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
     y_valid_gpu = torch.from_numpy(y_valid).float().to(device)
     depth_valid_gpu = torch.from_numpy(depth_valid).to(device)
 
-    if Train_Calibration_FLAG:
-        x_train_gpu = filter_aug_train(x_train_gpu, depth_train_gpu)
-        x_valid_gpu = filter_aug_train(x_valid_gpu, depth_valid_gpu)
-
     # Calculate Mean
     mean_data = torch.mean(x_train_gpu, 0, True)
     std_data = torch.std(x_train_gpu, 0, True)
@@ -256,10 +247,15 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
     else:
         raise ValueError("Invalid Network")
 
-    # Use Batch Stats in BatchNorm2d layers
+    # Freezing BatchNorm2d layers
     for module in net.modules():
         if isinstance(module, nn.BatchNorm2d):
+            if hasattr(module, 'weight'):
+                module.weight.requires_grad_(False)
+            if hasattr(module, 'bias'):
+                module.bias.requires_grad_(False)
             module.track_running_stats = False
+            module.affine = False
             module.running_var, module.running_mean = None, None
             module.eval()
 
@@ -354,7 +350,7 @@ def train_function(x_train, x_valid, y_train, y_valid, depth_train, depth_valid,
             accuracies.append(total/2)
             writer.add_scalar("Accuracy/valid", total/2, epoch)
         logger.info(f"Execution time is {time.time() - start_time} seconds")
-        # torch.save(net.state_dict(), PATH_models+f"epoch{epoch}.pth")
+        #torch.save(net.state_dict(), PATH_models+f"epoch{epoch}.pth")
     logger.info('Finished Training')
 
     torch.save(net.state_dict(), PATH)
@@ -452,10 +448,10 @@ if __name__ == '__main__':
             # Load training and test data
             train_vol1 = np.load(f'./train1.npy')
             train_vol2 = np.load(f'./train2.npy')
-            # test_vol1 = np.load(f'./test1.npy')
-            # test_vol2 = np.load(f'./test2.npy')
-            test_vol1 = np.load(f'./test1_l11_5.npy')
-            test_vol2 = np.load(f'./test2_l11_5.npy')
+            test_vol1 = np.load(f'./test1.npy')
+            test_vol2 = np.load(f'./test2.npy')
+            # test_vol1 = np.load(f'./test1_l11_5.npy')
+            # test_vol2 = np.load(f'./test2_l11_5.npy')
 
             # Split data into training and validation sets
             x_train, x_dev, y_train, y_dev, depth_train, depth_dev = train_split(train_vol1, train_vol2, train_num)
